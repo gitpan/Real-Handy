@@ -1,0 +1,43 @@
+=head1 NAME
+
+Real::Handy - Perl extension for comfortable developing like ( common::sense, Modern::Perl, etc, ... )
+
+=head1 SYNOPSIS
+
+   use Real::Handy::NoConfig;
+	
+   instead of:
+
+   use strict;
+   use warnings; no warnings 'uninitialized';
+   use Data::Dumper;
+   use Carp;
+   use FCGI;
+   use DBI; 
+   use ... Some other usefull module
+   use 5.010; for given, state, say
+   use Scalar::Util 
+   use utf8;
+
+
+=head1 DESCRIPTION
+
+	See explanation of Toolkit and Modern::Perl. DEVELOPMENT VERSION. 
+
+=head1 SEE ALSO
+
+	L<common::sense>, L<Modern::Perl>, L<Toolkit>
+
+=head1 AUTHOR
+
+Grishaev Anatoliy, E<lt>grian@cpanE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2011 by Grishaev Anatoliy
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.10.1 or,
+at your option, any later version of Perl 5 you may have available.
+
+=cut
