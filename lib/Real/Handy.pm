@@ -1,5 +1,5 @@
 package Real::Handy;
-our $VERSION = '0.17';
+our $VERSION = '0.24';
 my $warnings = 
   "\x54\x55\x55\x55\x55\x55\x55\x55\x55\x55\x55\x15"
 ^ "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00";
@@ -12,10 +12,26 @@ my $utf8 = 0x00800000;
 set_autouse( __PACKAGE__ . '=clean_namespace' );
 sub set_utf8 { $utf8 = $_[0] ? 0x00800000 : 0 };
 our $SKIP_CONFIG;
+1 if $DB::single;
 sub import{
-	my $self = shift;
-	my $caller = caller;
-	$self->customize_module( $caller, \@_ );
+    my $self = shift;
+    my $caller = caller;
+    my @caller = caller;
+    do {
+	my $fixpackage = $caller;
+	if ( $fixpackage ne 'main' ){
+	    $fixpackage=~s/::/\//g;
+	    $fixpackage=~s/\.pm|\z/.pm/;
+	    $INC{ $fixpackage } = $caller[1];
+	}
+    };
+    
+    $SKIP_CONFIG || do {
+	$SKIP_CONFIG = 1;
+	_require_config(@_);
+	1;
+    };
+    $self->customize_module( $caller, \@_ );
     if ( $autouse{ $caller } ){
         # delete ${ $caller . "::" }{AUTOLOAD};
     }
@@ -34,25 +50,83 @@ sub import{
         }
         if ( $state->{sub} ) {
             for ( @{ $state->{sub} } ) {
-				*{ $caller . "::" . $_ } = \&{ $module . "::" . $_ };
-				$clean_namespace{$caller}{$_} = 1;
+		*{ $caller . "::" . $_ } = \&{ $module . "::" . $_ };
+		$clean_namespace{$caller}{$_} = 1;
             }
         }
     }
+    if ( $] >= 5.016){
+	require feature;
+	@_ = ();
+	@_ = qw(feature say switch);
+	goto &feature::import;
+    }
 }
-sub require_config {
+sub bn{
+    my $dd = shift;
+    my $dev = shift;
+    my $inode = shift;
+    opendir my $f, $dd or die "Can't open dd";
+    while( my $g = readdir $f ){
+        my $stat = [ lstat "$dd/$g" ];
+        next if $stat->[1] != $inode;
+        next if $stat->[0] != $dev;
+        next if $g eq '.';
+        next if $g eq '..';
+        return "$dd/$g" if $dd ne '/';
+        return "/$g";
+    }
+    return;
+}
+sub _croak{ require Carp ; Carp->import; goto &croak; };
+sub der{
+    my $dd = shift;
+    my $limit = shift // 16;
+    _croak "not a directory" unless -d $dd;
+    _croak "limit exceed" unless $limit;
+    my @st = lstat $dd;
+    my @rt = lstat '/';
+    return '/' if $st[0] == $rt[0] && $st[1] == $rt[1];
+    my @limit = split '/', $dd;
+    my $before = der( $dd . '/' . '..' );
+    return bn( $before, $st[0], $st[1] );
+}
+
+
+sub inc_remove{
+    @INC = grep $_[0] ne $_, @INC;
+    @INC = grep $_[1] ne $_, @INC if $_[1];
+}
+
+sub _require_config{
     # set my @INC
     my $workspace;
-	my @PWD;
-	for  ( map "$_", grep $_, $ENV{'DOCUMENT_ROOT'} ){
-		last unless $_;
-		s#\w+/?\z##;
-		push @PWD, $_;
-	};
-    for ( $ENV{PWD}, @PWD, $0, $ENV{project} ){
+    my $ourdir = __FILE__;
+    $ourdir=~s/\/[^\/]+\/*\z// for 1..2; 
+    $ourabs = der( $ourdir );
+    if ( $ourabs ){
+	if ( -f "$ourabs/handy.pl" ){
+	    if ( $ourabs=~s#/lib\z##  ){
+		inc_remove( $ourdir );
+		set_workspace( $ourabs );
+		return;
+	    }
+	}
+    }
+    my @PWD;
+    if   ( @_ ) {
+	push @PWD, @_;
+    };
+    for  ( map "$_", grep $_, $a = $ENV{'DOCUMENT_ROOT'} ){
+	    last unless $_;
+	    s#\w+/?\z##;
+	    push @PWD, $_;
+    };
+    local($a,$b);
+    for ( grep $_, $b = $ENV{PWD}, @PWD, $0, $a = $ENV{project} ){
         if (m#(/home/sites/[-\.\w]+|/home/\w+)#){
-			my $candidate =  substr $_, 0, $+[0];
-			if ( -f "$candidate/config/site.pl" ){
+	    my $candidate =  substr $_, 0, $+[0];
+	    if ( -f "$candidate/config/site.pl" ){
                 $workspace = $candidate ;
                 last ;
             }
@@ -62,21 +136,28 @@ sub require_config {
         warn "Can't load proper config ( ENV{project} = '$ENV{project}'";
         return;
     }
-
-    if ( -d ( my $lib = "$workspace/lib" ) ) {
-        @INC = grep $_ ne $lib, @INC;
-        unshift @INC, $lib;
-    }
-    $Real::Handy::Workspace = $workspace;
-    ( $Real::Handy::WorkName = $workspace ) =~ s/.*\///;
-    my $config = "$workspace/config/site.pl";
-    if ( -f $config && -s $config ) {
-        require $config if $_[0] !~m/config\/site\.pl\z/;
-        return;
-    }
-    warn "no config found at '$config'";
-    return;
+    set_workspace( $workspace );
 }
+
+sub set_workspace{
+    my $location = shift;
+    $location = shift if UNIVERSAL::isa( $location, 'Real::Handy' );
+    return unless -d $location;
+    for ( $Real::Handy::Workname = $Real::Handy::Workspace = $location){
+	s/\/+\z//;
+	s/.*\///;
+    };
+    my $l = "$location/lib";
+    if ( ref $INC[0] ){
+	splice @INC, 1,0,($l) if -d $l;
+    }
+    else {
+	unshift @INC, $l if -d $l;
+    }
+    my ( $c ) = grep -f -s $_, "$location/lib/handy.pl", "$location/config/site.pl";
+    require $c if -f $c && -s $c;
+};
+
 
 sub customize_module{
     my $self = shift;
@@ -98,7 +179,6 @@ sub set_autoload {
     my ( $module ) = @_;
 
 
-    my $AUTOLOAD_var = \${ $module . "::AUTOLOAD" };
     my $require      = "require $module; ";
 
     s/::/\//g for (my $pm = $module . ".pm");
@@ -142,10 +222,10 @@ sub set_autoload {
 }
 sub set_autouse{
     while (@_) {
-		if ($_[0]=~m/\n/){
-			push @_, split " ", $_[0];
-			next;
-		}
+	if ($_[0]=~m/\n/){
+		push @_, split " ", $_[0];
+		next;
+	}
         my ( $module, $param ) = split "=", $_[0], 2;
 
         my $state = $autouse{ $module };
@@ -158,17 +238,17 @@ sub set_autouse{
             my @all_import = split ",",        $param || '';
             my @var_import = grep m/^[%\@\$]/, @all_import;
             my @sub_import = grep m/^\w/,      @all_import;
-			if ( @var_import ){
-				$state->{var} = \@var_import;
-			}
-			if (@sub_import){
-				$state->{sub} = \@sub_import;
-			}
+	    if ( @var_import ){
+		    $state->{var} = \@var_import;
+	    }
+	    if (@sub_import){
+		    $state->{sub} = \@sub_import;
+	    }
         }
     }
-	continue {
-		shift @_;
-	}
+    continue {
+	    shift @_;
+    }
 }
 sub clean_namespace {
     my $caller = caller;
@@ -189,10 +269,53 @@ sub clean_namespace {
     'yes!';
 }
 sub unimport{
-	    $^H ^= $^H & 0x00000002;
+    $^H ^= $^H & 0x00000002;
 }
 # load site define options
 # Prevent Real::Handy loading twice
 $INC{'Real/Handy.pm'} ||= 'S';
-require_config((caller)[1]) if ! $SKIP_CONFIG;
 1;
+
+# Preloaded methods go here.
+__END__
+=head1 NAME
+
+Real::Handy - Perl extension for fast developing 
+
+=head1 SYNOPSIS
+
+	use Real::Handy;
+#   instead of:
+#   use strict;
+#   use warnings; no warnings 'uninitialized';
+#   use Data::Dumper;
+#   use autouse;
+#   use Carp;
+#   use FCGI;
+#   use ... Some other usefull module
+#   use 5.010; for given, state, say
+#   use Scalar::Util
+#   use utf8;
+
+
+=head1 DESCRIPTION
+
+	See explanation of Toolkit.
+
+=head1 SEE ALSO
+
+
+=head1 AUTHOR
+
+GTOLY, E<lt>grian@cpanE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2011 by grian
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.10.1 or,
+at your option, any later version of Perl 5 you may have available.
+
+
+=cut

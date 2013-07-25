@@ -4,7 +4,5 @@ MANIFEST
 README
 t/Real-Handy.t
 lib/Real/Handy.pm
-lib/Real/Handy.pod
-lib/Real/Handy/File.pm
-lib/Real/Handy/NoConfig.pm
 META.yml                                 Module meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)
